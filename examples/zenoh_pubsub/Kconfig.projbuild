@@ -1,0 +1,30 @@
+menu "Zenoh PubSub Example"
+
+    config WIFI_SSID
+        string "Wi-Fi SSID"
+        default "myssid"
+        help
+            SSID of the Wi-Fi AP to connect.
+
+    config WIFI_PASSWORD
+        string "Wi-Fi Password"
+        default "mypassword"
+        help
+            Password for the Wi-Fi AP.
+
+    config ZENOH_MODE
+        int "Zenoh mode (0=client 1=peer)"
+        default 0
+        range 0 1
+        help
+            0: client mode — connect to a zenohd router via LOCATOR.
+            1: peer mode  — UDP multicast scouting, no router needed.
+
+    config ZENOH_LOCATOR
+        string "Zenoh locator (client mode)"
+        default "tcp/192.168.1.100:7447"
+        depends on ZENOH_MODE = 0
+        help
+            TCP endpoint of the zenohd router (used in client mode only).
+
+endmenu
