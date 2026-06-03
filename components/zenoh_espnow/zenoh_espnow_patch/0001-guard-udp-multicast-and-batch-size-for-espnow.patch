@@ -35,9 +35,24 @@ index 26e955b..fb61a9e 100644
  #if Z_FEATURE_LINK_SERIAL == 1
  /*------------------ Serial sockets ------------------*/
 diff --git a/src/system/espidf/system.c b/src/system/espidf/system.c
-index b19873c..cc07523 100644
+index b19873c..aad83fc 100644
 --- a/src/system/espidf/system.c
 +++ b/src/system/espidf/system.c
+@@ -170,10 +170,10 @@ z_result_t _z_mutex_rec_unlock(_z_mutex_rec_t *m) { _Z_CHECK_SYS_ERR(pthread_mut
+ 
+ /*------------------ Condvar ------------------*/
+ z_result_t _z_condvar_init(_z_condvar_t *cv) {
+-    pthread_condattr_t attr;
+-    pthread_condattr_init(&attr);
+-    pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
+-    _Z_CHECK_SYS_ERR(pthread_cond_init(cv, &attr));
++    // pthread_condattr_setclock(CLOCK_MONOTONIC) is not supported on ESP-IDF;
++    // the call is silently ignored and produces a logspam warning.
++    // _z_condvar_wait_until handles the MONOTONIC→REALTIME conversion instead.
++    _Z_CHECK_SYS_ERR(pthread_cond_init(cv, NULL));
+ }
+ 
+ z_result_t _z_condvar_drop(_z_condvar_t *cv) { _Z_CHECK_SYS_ERR(pthread_cond_destroy(cv)); }
 @@ -185,12 +185,37 @@ z_result_t _z_condvar_signal_all(_z_condvar_t *cv) { _Z_CHECK_SYS_ERR(pthread_co
  z_result_t _z_condvar_wait(_z_condvar_t *cv, _z_mutex_t *m) { _Z_CHECK_SYS_ERR(pthread_cond_wait(cv, m)); }
  

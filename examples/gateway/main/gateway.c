@@ -78,8 +78,9 @@ static void wifi_init_apsta(void)
     /* STA: connect to home AP */
     wifi_config_t sta_cfg = {
         .sta = {
-            .ssid     = CONFIG_WIFI_SSID,
-            .password = CONFIG_WIFI_PASSWORD,
+            .ssid      = CONFIG_WIFI_SSID,
+            .password  = CONFIG_WIFI_PASSWORD,
+            .threshold = { .authmode = WIFI_AUTH_WPA2_PSK },
         },
     };
     /* AP: minimal softAP so the channel is visible to ESP-NOW nodes.
