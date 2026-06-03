@@ -24,7 +24,7 @@ file(GLOB_RECURSE ZENOH_SOURCES
 idf_component_register(
     SRCS ${ZENOH_SOURCES}
     INCLUDE_DIRS "${ZENOH_PICO_DIR}/include"
-    REQUIRES esp_wifi nvs_flash lwip
+    REQUIRES esp_wifi nvs_flash lwip driver
 )
 
 target_compile_definitions(${COMPONENT_LIB} PUBLIC ZENOH_ESPIDF)

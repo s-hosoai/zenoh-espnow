@@ -3,6 +3,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_system.h"
+#include "esp_mac.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_log.h"
@@ -19,10 +20,10 @@ static void recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t *data, i
              MAC2STR(src), recv_info->rx_ctrl->rssi, len, (const char *)data);
 }
 
-static void send_cb(const uint8_t *mac_addr, esp_now_send_status_t status)
+static void send_cb(const esp_now_send_info_t *tx_info, esp_now_send_status_t status)
 {
     ESP_LOGD(TAG, "TX to " MACSTR ": %s",
-             MAC2STR(mac_addr), status == ESP_NOW_SEND_SUCCESS ? "OK" : "FAIL");
+             MAC2STR(tx_info->des_addr), status == ESP_NOW_SEND_SUCCESS ? "OK" : "FAIL");
 }
 
 static void wifi_init(void)
