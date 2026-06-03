@@ -18,6 +18,12 @@ uint8_t zenoh_espnow_get_channel(void);
  */
 uint32_t zenoh_espnow_get_rx_dropped(void);
 
+/**
+ * Return the number of transmission failures (queue full after retries,
+ * or other esp_now_send errors).
+ */
+uint32_t zenoh_espnow_get_tx_failed(void);
+
 #ifdef __cplusplus
 }
 #endif

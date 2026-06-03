@@ -253,7 +253,8 @@ void app_main(void)
 
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(5000));
-        ESP_LOGI(TAG, "alive  espnow_dropped=%"PRIu32, zenoh_espnow_get_rx_dropped());
+        ESP_LOGI(TAG, "alive  rx_dropped=%"PRIu32"  tx_failed=%"PRIu32,
+                 zenoh_espnow_get_rx_dropped(), zenoh_espnow_get_tx_failed());
     }
 
     z_drop(z_move(sub_a));
