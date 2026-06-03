@@ -1,0 +1,34 @@
+menu "Gateway"
+
+    config WIFI_SSID
+        string "Wi-Fi SSID (home AP)"
+        default "myssid"
+        help
+            SSID of the home Wi-Fi AP. The gateway connects as a STA.
+            ESP-NOW nodes must use the same channel as this AP.
+
+    config WIFI_PASSWORD
+        string "Wi-Fi Password"
+        default "mypassword"
+
+    config ZENOHD_LOCATOR
+        string "zenohd locator"
+        default "tcp/192.168.0.100:7447"
+        help
+            TCP endpoint of the zenohd Router running on PC/SBC.
+
+    config FWD_ESPNOW_TO_WIFI_KEY
+        string "Key forwarded ESP-NOW → Wi-Fi"
+        default "sensor/**"
+        help
+            Zenoh key expression subscribed on session_a (ESP-NOW side).
+            Matching samples are republished on session_b (Wi-Fi side).
+
+    config FWD_WIFI_TO_ESPNOW_KEY
+        string "Key forwarded Wi-Fi → ESP-NOW"
+        default "cmd/**"
+        help
+            Zenoh key expression subscribed on session_b (Wi-Fi side).
+            Matching samples are republished on session_a (ESP-NOW side).
+
+endmenu
