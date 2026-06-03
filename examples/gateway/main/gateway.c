@@ -110,22 +110,25 @@ static void forward_sample(z_loaned_sample_t *sample,
                             z_loaned_session_t *dst,
                             const char *direction)
 {
+    // z_keyexpr_as_view_string returns a non-null-terminated view.
+    // Use %.*s for logging, and pass z_sample_keyexpr directly to z_put
+    // to avoid null-termination assumptions.
     z_view_string_t key_view;
     z_keyexpr_as_view_string(z_sample_keyexpr(sample), &key_view);
-    const char *key_data = z_string_data(z_view_string_loan(&key_view));
+
+    ESP_LOGD(TAG, "%s  '%.*s'", direction,
+             (int)z_string_len(z_view_string_loan(&key_view)),
+             z_string_data(z_view_string_loan(&key_view)));
 
     z_owned_string_t payload_str;
     z_bytes_to_string(z_sample_payload(sample), &payload_str);
 
-    ESP_LOGD(TAG, "%s  '%s'", direction, key_data);
-
-    z_view_keyexpr_t ke;
-    z_view_keyexpr_from_str_unchecked(&ke, key_data);
-
     z_owned_bytes_t fwd;
     z_bytes_copy_from_str(&fwd, z_string_data(z_string_loan(&payload_str)));
-    if (z_put(dst, z_loan(ke), z_move(fwd), NULL) < 0) {
-        ESP_LOGW(TAG, "%s put failed for '%s'", direction, key_data);
+    if (z_put(dst, z_sample_keyexpr(sample), z_move(fwd), NULL) < 0) {
+        ESP_LOGW(TAG, "%s put failed for '%.*s'", direction,
+                 (int)z_string_len(z_view_string_loan(&key_view)),
+                 z_string_data(z_view_string_loan(&key_view)));
     }
 
     z_string_drop(z_string_move(&payload_str));
