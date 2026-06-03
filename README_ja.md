@@ -2,46 +2,35 @@
 
 **[English README](README.md)**
 
-ESP-NOW を物理トランスポートとして使い、[zenoh-pico](https://github.com/eclipse-zenoh/zenoh-pico) を介して ESP32-S3 間でルータ不要の Zenoh pub/sub 通信を実現するプロジェクトです。
+**ESP-NOW 上で Zenoh pub/sub — ルータ不要、IPスタック不要、設定不要。**
 
-## 概要
-
-zenoh-pico の UDP マルチキャスト PAL 関数を ESP-NOW ブロードキャストで置き換えるカスタムトランスポートを実装しています。IPスタック・Wi-Fi 接続・ルータなしでノード間通信が可能であり、ゲートウェイ経由で標準的な Zenoh エコシステムとも相互通信できます。
+複数の ESP32-S3 デバイスが [zenoh-pico](https://github.com/eclipse-zenoh/zenoh-pico) を使い、ESP-NOW ブロードキャストで直接 pub/sub データを交換できます。インフラ不要で、電源を入れるだけで自動的に互いを発見して通信を開始します。
 
 ```
-[ESP-NOWネットワーク]                  [Wi-Fi / Zenohネットワーク]
-  Node A (pub/sub)                       zenohd Router (PC/SBC)
-  Node B (pub/sub)  <── Gateway ──>      zenoh Client (PC)
-  Node C (pub/sub)    ESP32-S3           zenoh-pico (Wi-Fi ESP32)
-                      WIFI_AP_STA
+  Node A          Node B          Node C
+ (pub/sub)       (pub/sub)       (pub/sub)
+    │                │                │
+    └────────────────┴────────────────┘
+           ESP-NOW ブロードキャスト
+        （ルータなし・AP なし・IP なし）
 ```
 
-### 主要な設計方針
+## このプロジェクトが解決すること
 
-| 項目 | 決定 | 理由 |
+標準的な Zenoh は TCP/UDP 上で動作し、ネットワークインフラが必要です。本プロジェクトはそのトランスポート層を ESP-NOW に置き換えます。ESP-NOW は IEEE 802.11 Vendor-specific Action Frame を使った低レイテンシプロトコルで、**IPスタックも Wi-Fi 接続も不要**です。
+
+| | 標準 Zenoh | zenoh-esp-now |
 |---|---|---|
-| トランスポートモード | multicast peer | ブロードキャスト1回で全台配信、ピアテーブル管理不要 |
-| 送信方式 | ESP-NOW broadcast (`FF:FF:FF:FF:FF:FF`) | ノード数に依存しない O(1) 送信 |
-| Discovery | zenoh-pico JOIN メッセージ | 定期ブロードキャスト JOIN → 自動ピア登録、ゼロコンフィグ |
-| 信頼性 | ベストエフォート（ACKなし） | pub/sub はデータ欠損許容 |
-| 暗号化 | 無効（Phase 1） | ブロードキャストと CCMP は共存不可 |
-| チャンネル | 固定（Kconfig） | 全ノードが同一の 2.4 GHz チャンネルを使用する必要あり |
-
-## 必要環境
-
-### ハードウェア
-
-- ESP32-S3（ESP32 / ESP32-C シリーズも可 — `CMakeLists.txt` の `IDF_TARGET` を変更）
-- フラッシュ 8 MB 推奨
-
-### ソフトウェア
-
-- [ESP-IDF v5.5.x](https://github.com/espressif/esp-idf)（Xtensa ツールチェーン付き）
-- Git（サブモジュール対応）
+| トランスポート | TCP / UDP | ESP-NOW ブロードキャスト |
+| Router 必要 | 必要（zenohd） | **不要** |
+| IP アドレス必要 | 必要 | **不要** |
+| ノード発見 | 手動 or zenohd | **自動（JOIN）** |
+| レイテンシ | 〜ms（Wi-Fi） | 〜ms（ESP-NOW） |
+| 最大ペイロード | 無制限（フラグメント） | 250 B / フレーム |
 
 ## クイックスタート
 
-### 1. サブモジュールごとクローン
+### 1. クローン
 
 ```bash
 git clone --recurse-submodules <repo-url>
@@ -50,25 +39,58 @@ cd zenoh-espnow
 
 ### 2. zenoh-pico へパッチを適用
 
-`network.c` にオーバーライドフックを追加し、`config.h` に `#ifndef` ガードを入れることで `zenoh_espnow` が UDP マルチキャスト PAL 関数を ESP-NOW に置き換えられるようにします。
-
 ```bash
 scripts/apply_patches.sh
 ```
 
-### 3. ESP-IDF 環境を読み込む
-
-```bash
-source $IDF_PATH/export.sh
-```
-
-### 4. サンプルをビルド・書き込み
+### 3. 2台以上の ESP32-S3 に `espnow_node` を書き込む
 
 ```bash
 cd examples/espnow_node
-idf.py menuconfig   # ESPNOW_CHANNEL をネットワークに合わせて設定
+idf.py menuconfig   # ESPNOW_CHANNEL を設定（全ボードで同じ値）
 idf.py build flash monitor
 ```
+
+以上です。各ノードは隣接ノードを自動発見し、追加設定なしで pub/sub を開始します。
+
+期待されるログ出力：
+
+```
+I zenoh_espnow: Ready  MAC=24:58:7c:xx:xx:xx  ch=1
+I zenoh_espnow: Opening Zenoh session (ESP-NOW transport)...
+I espnow_node:  Subscribed to 'sensor/**'
+I espnow_node:  TX: {"seq":0,"mac":"24:58:7c:xx:xx:xx"}
+I espnow_node:  RX  'sensor/24:58:7c:yy:yy:yy/data'  '{"seq":3,...}'
+```
+
+## 仕組み
+
+zenoh-pico の UDP マルチキャスト PAL 関数を、コンパイル時に `ZENOH_ESPNOW_LINK_OVERRIDE` フラグで ESP-NOW 版に差し替えています。ロケータ文字列 `udp/224.0.0.225:7447` はそのまま使うことで、zenoh-pico の multicast peer セッションロジック（JOIN・ピア発見・pub/sub ルーティング）を変更なしに利用します。変わるのは物理的な送受信パスのみです。
+
+```
+zenoh-pico  peer mode
+  └─ _z_send_udp_multicast()  →  esp_now_send(FF:FF:FF:FF:FF:FF, ...)
+  └─ _z_read_udp_multicast()  →  FreeRTOS キュー ← ESP-NOW 受信コールバック
+  └─ _z_open_udp_multicast()  →  esp_now_init()
+```
+
+ピア発見は zenoh-pico 組み込みの **JOIN メッセージ機構**を使います。各ノードが定期的に JOIN フレームをブロードキャストし、受信したノードが送信元を Zenoh ピアとして登録します。手動ペアリングやアドレス設定は一切不要です。
+
+## 主要な設計方針
+
+| 項目 | 決定 | 理由 |
+|---|---|---|
+| 送信方式 | ESP-NOW broadcast (`FF:FF:FF:FF:FF:FF`) | ノード数に依存しない O(1) 送信 |
+| ピア発見 | zenoh-pico JOIN ブロードキャスト | ゼロコンフィグ自動検出 |
+| 信頼性 | ベストエフォート | pub/sub はデータ欠損許容 |
+| 暗号化 | 無効 | ブロードキャストと CCMP は共存不可 |
+| チャンネル | 固定（Kconfig） | 全ノードが同一の 2.4 GHz チャンネルを使用 |
+| ペイロード上限 | 250 B / フレーム | ESP-NOW v1.0；zenoh-pico フラグメンテーションで透過的に対応 |
+
+## 必要環境
+
+- **ハードウェア**: ESP32-S3（ESP32 / ESP32-C も可 — `CMakeLists.txt` の `IDF_TARGET` を変更）
+- **ソフトウェア**: [ESP-IDF v5.5.x](https://github.com/espressif/esp-idf)、Git
 
 ## リポジトリ構成
 
@@ -76,72 +98,68 @@ idf.py build flash monitor
 zenoh-espnow/
 ├── components/
 │   ├── zenoh_pico_idf/          zenoh-pico の ESP-IDF コンポーネントラッパー
-│   │   └── CMakeLists.txt
-│   └── zenoh_espnow/            ESP-NOW カスタムトランスポート（本ライブラリ）
-│       ├── CMakeLists.txt
-│       ├── include/
-│       │   └── zenoh_espnow.h   公開 API（診断情報）
-│       ├── src/
-│       │   └── zenoh_espnow_link.c  PAL オーバーライド: open/close/read/write
-│       └── zenoh_espnow_patch/
-│           └── 0001-*.patch     zenoh-pico への最小限のパッチ
+│   └── zenoh_espnow/            ESP-NOW トランスポートライブラリ
+│       ├── include/zenoh_espnow.h
+│       ├── src/zenoh_espnow_link.c
+│       └── zenoh_espnow_patch/  zenoh-pico への最小限のパッチ
 ├── examples/
-│   ├── espnow_broadcast/        Phase 1: 生 ESP-NOW ブロードキャスト動作確認
-│   ├── zenoh_pubsub/            Phase 1: Wi-Fi UDP での zenoh-pico pub/sub 動作確認
-│   ├── espnow_node/             Phase 2/3: ESP-NOW 経由 zenoh pub/sub（AP 不要）
-│   └── gateway/                 Phase 4: ESP-NOW ↔ Wi-Fi/zenohd ブリッジ
-├── third_party/
-│   └── zenoh-pico/              サブモジュール — zenoh-pico v1.9.0
-├── docs/
-│   ├── spec.md                  詳細仕様書
-│   └── Milestone.md             フェーズ計画と進捗
-└── scripts/
-    └── apply_patches.sh         zenoh-pico パッチ適用スクリプト
+│   ├── espnow_node/             コアサンプル: ESP-NOW 上の Zenoh pub/sub
+│   ├── gateway/                 応用: Wi-Fi / zenohd へのブリッジ
+│   ├── espnow_broadcast/        ユーティリティ: 生 ESP-NOW チャンネル確認
+│   └── zenoh_pubsub/            ユーティリティ: 標準 Wi-Fi 上の zenoh-pico
+├── third_party/zenoh-pico/      サブモジュール — zenoh-pico v1.9.0
+├── docs/                        spec.md, Milestone.md
+└── scripts/apply_patches.sh
 ```
 
 ## サンプル一覧
 
-### `espnow_broadcast`
+### `espnow_node` — コアサンプル
 
-生 ESP-NOW ブロードキャストの送受信サンプルです。zenoh を乗せる前にチャンネル設定やハードウェアを検証するために使います。
-
-```bash
-cd examples/espnow_broadcast && idf.py build flash monitor
-```
-
-### `zenoh_pubsub`
-
-標準的な Wi-Fi UDP マルチキャスト上での zenoh-pico pub/sub サンプルです。トランスポートを置き換える前に zenoh-pico 単体の動作を確認します。
-
-```bash
-cd examples/zenoh_pubsub
-idf.py menuconfig   # Wi-Fi SSID/パスワードと Zenoh モードを設定
-idf.py build flash monitor
-```
-
-### `espnow_node`
-
-ESP-NOW をトランスポートとして使う完全な zenoh ピアノードです。AP 接続不要。各ノードは：
+AP もルータも不要な ESP-NOW 上の Zenoh pub/sub。
 
 - `sensor/<MAC>/data` を 2 秒ごとにパブリッシュ
 - `sensor/**` をサブスクライブ
+- 同じチャンネルの 2 台以上で動作
 
 ```bash
-cd examples/espnow_node
-idf.py menuconfig   # ESPNOW_CHANNEL を設定
-idf.py build flash monitor
+cd examples/espnow_node && idf.py menuconfig && idf.py build flash monitor
 ```
 
-全ノードを**同じチャンネル**に設定してください。
+### `espnow_broadcast` — チャンネル確認
 
-### `gateway`
+Zenoh を乗せない生 ESP-NOW ブロードキャスト。`espnow_node` を書き込む前のチャンネル設定確認に使います。
 
-ESP-NOW ネットワークと zenohd Router を Wi-Fi/TCP で接続するブリッジです。
+---
+
+## 応用: Wi-Fi / Zenoh ネットワークへのゲートウェイ
+
+ゲートウェイサンプルは、ESP-NOW ネットワークを Wi-Fi 上の標準的な Zenoh ネットワークに接続します。
 
 ```
-sub(session_a, "sensor/**") → pub(session_b)   ESP-NOW → zenohd
-sub(session_b, "cmd/**")    → pub(session_a)   zenohd  → ESP-NOW
+[ESP-NOWネットワーク]                  [Wi-Fi / Zenohネットワーク]
+  espnow_node A                          zenohd Router (PC/SBC)
+  espnow_node B  <── Gateway ──>         zenoh Client (PC)
+  espnow_node C    ESP32-S3
 ```
+
+ゲートウェイは **2つの独立した zenoh-pico セッション**を実行します：
+
+| セッション | モード | トランスポート |
+|---|---|---|
+| `session_a` | peer | ESP-NOW（本ライブラリ） |
+| `session_b` | client | TCP → zenohd Router |
+
+転送はキースペースを分離してループを防止します：
+
+```
+sub(session_a, "sensor/**")  →  pub(session_b)   ESP-NOW → Wi-Fi
+sub(session_b, "cmd/**")     →  pub(session_a)   Wi-Fi  → ESP-NOW
+```
+
+`ZENOH_ESPNOW_LINK_OVERRIDE` は UDP マルチキャスト関数のみを置換し、TCP 関数は `network.c` に残るため、両トランスポートが同一バイナリで共存できます。
+
+### ゲートウェイのセットアップ
 
 ```bash
 cd examples/gateway
@@ -149,18 +167,22 @@ idf.py menuconfig   # Wi-Fi SSID/パスワードと zenohd の IP を設定
 idf.py build flash monitor
 ```
 
-PC 側の準備：
+PC 側：
 
 ```bash
-zenohd -l tcp/0.0.0.0:7447   # Router 起動
-z_sub --key 'sensor/**'       # ESP-NOW ノードのデータを受信
+zenohd -l tcp/0.0.0.0:7447
+z_sub --key 'sensor/**'
 ```
 
-ゲートウェイ起動ログの以下の行でチャンネルを確認し、`espnow_node` の `ESPNOW_CHANNEL` と合わせてください：
+ゲートウェイのログ `ESP-NOW ch=X` を確認し、全 `espnow_node` デバイスの `ESPNOW_CHANNEL` を同じ値に設定してください。
 
-```
-I gateway: IP: 192.168.x.x  ESP-NOW ch=6
-```
+### ゲートウェイの主な機能
+
+- Wi-Fi 切断時に zenohd へ自動再接続（指数バックオフ）
+- Wi-Fi 障害中も `session_a`（ESP-NOW）は継続動作
+- `zenoh_espnow_get_rx_dropped()` / `zenoh_espnow_get_tx_failed()` で診断情報を取得可能
+
+---
 
 ## コンポーネント API
 
@@ -169,36 +191,20 @@ I gateway: IP: 192.168.x.x  ESP-NOW ch=6
 
 uint8_t  zenoh_espnow_get_channel(void);     // 現在の Wi-Fi チャンネル
 uint32_t zenoh_espnow_get_rx_dropped(void);  // RX キュー溢れ回数
-uint32_t zenoh_espnow_get_tx_failed(void);   // TX 失敗回数
+uint32_t zenoh_espnow_get_tx_failed(void);   // TX 失敗回数（リトライ後）
 ```
-
-## トランスポートオーバーライドの仕組み
-
-`zenoh_espnow` コンポーネントが `zenoh_pico_idf` に `ZENOH_ESPNOW_LINK_OVERRIDE=1` を注入します。このフラグで `network.c` の元の UDP マルチキャスト関数がコンパイルから除外され、`zenoh_espnow_link.c` が同じシグネチャの ESP-NOW 版を提供します。
-
-```
-zenoh-pico (peer mode, "udp/224.0.0.225:7447")
-  └─ _z_f_link_*_udp_multicast()
-       └─ [PAL 呼び出し — ZENOH_ESPNOW_LINK_OVERRIDE でリダイレクト]
-            ├─ _z_send_udp_multicast()  →  esp_now_send(FF:FF:...:FF)
-            ├─ _z_read_udp_multicast()  →  xQueueReceive(rx_queue)
-            ├─ _z_open_udp_multicast()  →  esp_now_init()
-            └─ _z_close_udp_multicast() →  esp_now_deinit()
-```
-
-TCP 関数（`_z_open_tcp` 等）は `network.c` の別ブロックにあり、オーバーライドの影響を受けません。これにより `session_a`（ESP-NOW）と `session_b`（TCP → zenohd）が同一のゲートウェイバイナリで共存できます。
 
 ## 既知の制約
 
 | 制約 | 備考 |
 |---|---|
-| ペイロード ≤ 250 バイト | ESP-NOW v1.0 の制限；zenoh-pico のフラグメンテーションで大きなメッセージにも対応 |
+| ペイロード ≤ 250 B / フレーム | ESP-NOW v1.0；zenoh-pico フラグメンテーションで透過的に対応 |
 | 起動時にチャンネル固定 | 全ノードが同一の 2.4 GHz チャンネルを使用する必要あり |
-| 暗号化なし | ブロードキャストと CCMP は ESP-NOW で共存不可 |
+| 暗号化なし | ブロードキャストと CCMP は共存不可 |
 | ベストエフォートのみ | ACK なし；確実な配信には zenoh Advanced Pub/Sub を検討 |
-| ESP-NOW セッションは 1 つのみ | グローバルシングルトン；同一バイナリで 2 つの ESP-NOW セッションは不可 |
+| ESP-NOW セッションは 1 バイナリに 1 つ | グローバルシングルトン |
 
 ## ライセンス
 
-本プロジェクトは Apache License 2.0 でライセンスされています。  
-zenoh-pico は EPL-2.0 OR Apache-2.0 でライセンスされています。
+Apache License 2.0  
+zenoh-pico: EPL-2.0 OR Apache-2.0
