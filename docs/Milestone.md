@@ -3,8 +3,8 @@
 ## フェーズ概要
 
 ```
-Phase 1  ESP-NOW基礎確認          ← まずここから
-Phase 2  Zenoh-pico カスタムリンク実装
+Phase 1  ESP-NOW基礎確認          ✅ 完了 (2026-06-03)
+Phase 2  Zenoh-pico カスタムリンク実装  ← 現在
 Phase 3  Discovery / ゼロコンフィグ
 Phase 4  ゲートウェイ（Wi-Fi中継）
 Phase 5  堅牢化・最適化
@@ -12,27 +12,35 @@ Phase 5  堅牢化・最適化
 
 ---
 
-## Phase 1：ESP-NOW 基礎確認と環境構築
+## Phase 1：ESP-NOW 基礎確認と環境構築 ✅
 
 **目標**: ESP-NOW単体でブロードキャスト・ユニキャスト通信を安定動作させる。
 Zenoh-picoを乗せる前の土台を固める。
 
 **完了条件**: 2台以上のESP32間でブロードキャスト送受信が安定動作し、チャンネル管理を把握している。
 
+**完了日**: 2026-06-03
+
 ### TODO
 
-- [ ] ESP-IDF v5.x 開発環境セットアップ（toolchain, idf.py）
-- [ ] ESP-NOW ブロードキャスト送受信サンプル実装・動作確認
-  - [ ] `esp_now_init()`, `esp_now_register_recv_cb()`, `esp_now_send(FF:FF:FF:FF:FF:FF)` の基本動作
-  - [ ] 送信コールバック（ACKなし確認）
-- [ ] ESP-NOW ユニキャスト送受信サンプル実装
+- [x] ESP-IDF v5.5.4 開発環境セットアップ（toolchain, idf.py）
+- [x] ESP-NOW ブロードキャスト送受信サンプル実装・動作確認
+  - [x] `esp_now_init()`, `esp_now_register_recv_cb()`, `esp_now_send(FF:FF:FF:FF:FF:FF)` の基本動作
+  - [x] 送信コールバック（ACKなし確認）
+- [ ] ESP-NOW ユニキャスト送受信サンプル実装（Phase 2以降で必要になれば実施）
   - [ ] `esp_now_add_peer()` / `esp_now_del_peer()` の動的管理確認
   - [ ] 満杯（20台）→ del → add のスロット再利用確認
-- [ ] チャンネル管理の確認
+- [ ] チャンネル管理の確認（Phase 2以降で実施）
   - [ ] STAのみ（ch=1固定）vs WIFI_AP_STA（APチャンネル追従）の動作差異確認
   - [ ] `esp_wifi_get_channel()` でチャンネル取得・ログ確認
 - [ ] ペイロード上限確認（250B境界でのパケット送受信）
-- [ ] 複数ノード（3台以上）でのブロードキャスト疎通確認
+- [x] 複数ノード（2台）でのブロードキャスト疎通確認
+
+**備考**:
+- ESP-IDF v5.5.x では `esp_now_send_cb_t` のシグネチャが変更（`const esp_now_send_info_t *tx_info`）
+- `MACSTR`/`MAC2STR` は `esp_mac.h` の明示的インクルードが必要
+- zenoh-pico（v1.9.0）の動作確認も同時実施（`examples/zenoh_pubsub`）
+  - [x] Wi-Fi STA + zenoh-pico peer モード（UDP multicast）で pub/sub 疎通確認
 
 ---
 
