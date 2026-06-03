@@ -1,0 +1,18 @@
+menu "ESP-NOW Node"
+
+    config ESPNOW_CHANNEL
+        int "Wi-Fi channel"
+        default 1
+        range 1 13
+        help
+            All nodes in the same ESP-NOW network must use the same channel.
+            Choose a channel that is not heavily occupied by Wi-Fi APs nearby.
+
+    config ZENOH_KEY_PREFIX
+        string "Zenoh key expression prefix"
+        default "sensor"
+        help
+            Published key: <prefix>/<MAC>/data
+            Subscribed key: <prefix>/**
+
+endmenu

@@ -1,0 +1,36 @@
+diff --git a/include/zenoh-pico/config.h b/include/zenoh-pico/config.h
+index 41829f7..69cf872 100644
+--- a/include/zenoh-pico/config.h
++++ b/include/zenoh-pico/config.h
+@@ -22,7 +22,9 @@
+ /*--- CMake generated config; pass values to CMake to change the following tokens ---*/
+ #define Z_FRAG_MAX_SIZE 4096
+ #define Z_BATCH_UNICAST_SIZE 2048
++#ifndef Z_BATCH_MULTICAST_SIZE
+ #define Z_BATCH_MULTICAST_SIZE 2048
++#endif
+ #define Z_CONFIG_SOCKET_TIMEOUT 100
+ #define Z_TRANSPORT_LEASE 10000
+ #define Z_TRANSPORT_LEASE_EXPIRE_FACTOR 3
+diff --git a/src/system/espidf/network.c b/src/system/espidf/network.c
+index 26e955b..fb61a9e 100644
+--- a/src/system/espidf/network.c
++++ b/src/system/espidf/network.c
+@@ -396,6 +396,7 @@ size_t _z_send_udp_unicast(const _z_sys_net_socket_t sock, const uint8_t *ptr, s
+ #endif
+ 
+ #if Z_FEATURE_LINK_UDP_MULTICAST == 1
++#if !defined(ZENOH_ESPNOW_LINK_OVERRIDE)
+ z_result_t _z_open_udp_multicast(_z_sys_net_socket_t *sock, const _z_sys_net_endpoint_t rep, _z_sys_net_endpoint_t *lep,
+                                  uint32_t tout, const char *iface) {
+     z_result_t ret = _Z_RES_OK;
+@@ -733,7 +734,8 @@ size_t _z_send_udp_multicast(const _z_sys_net_socket_t sock, const uint8_t *ptr,
+                              const _z_sys_net_endpoint_t rep) {
+     return sendto(sock._fd, ptr, len, 0, rep._iptcp->ai_addr, rep._iptcp->ai_addrlen);
+ }
+-#endif
++#endif  /* !defined(ZENOH_ESPNOW_LINK_OVERRIDE) */
++#endif  /* Z_FEATURE_LINK_UDP_MULTICAST */
+ 
+ #if Z_FEATURE_LINK_SERIAL == 1
+ /*------------------ Serial sockets ------------------*/
