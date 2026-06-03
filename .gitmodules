@@ -1,3 +1,3 @@
-[submodule "components/zenoh-pico"]
-	path = components/zenoh-pico
+[submodule "third_party/zenoh-pico"]
+	path = third_party/zenoh-pico
 	url = https://github.com/eclipse-zenoh/zenoh-pico

@@ -5,7 +5,7 @@
 
 cmake_minimum_required(VERSION 3.16)
 
-set(ZENOH_PICO_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../zenoh-pico")
+set(ZENOH_PICO_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/zenoh-pico")
 
 file(GLOB_RECURSE ZENOH_SOURCES
     "${ZENOH_PICO_DIR}/src/api/*.c"
