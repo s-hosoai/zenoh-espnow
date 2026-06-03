@@ -5,8 +5,8 @@
 ```
 Phase 1  ESP-NOW基礎確認                ✅ 完了 (2026-06-03)
 Phase 2  Zenoh-pico カスタムリンク実装  ✅ 完了 (2026-06-03)
-Phase 3  Discovery / ゼロコンフィグ     ← 現在
-Phase 4  ゲートウェイ（Wi-Fi中継）
+Phase 3  Discovery / ゼロコンフィグ     ✅ 完了 (2026-06-03)
+Phase 4  ゲートウェイ（Wi-Fi中継）      ← 現在
 Phase 5  堅牢化・最適化
 ```
 
@@ -75,26 +75,31 @@ Zenoh-picoを乗せる前の土台を固める。
 
 ---
 
-## Phase 3：Discovery / ゼロコンフィグ（Scouting）
+## Phase 3：Discovery / ゼロコンフィグ（Scouting）✅
 
 **目標**: 事前にIPもMACも設定せず、電源を入れるだけで近隣ノードを発見・接続できるようにする。
 
 **完了条件**: 3台以上のESP32を同時起動し、設定なしで全台のpub/subが相互に動作する。
 
+**完了日**: 2026-06-03
+
 ### TODO
 
-- [ ] Zenoh Scouting メッセージのESP-NOWブロードキャスト対応確認
-  - [ ] multicast transport の Scout パケットがbroadcastとして出ているかパケットキャプチャ確認
-  - [ ] 受信側がScout返答を返し、セッションを確立することの確認
-- [ ] 動的ピア発見の実装
-  - [ ] 受信コールバックで未知の src MAC を検出 → Zenoh peer として登録
-  - [ ] ZID と MAC の対応テーブル管理
-- [ ] Gossip scouting の動作確認（A→B→Cの連鎖発見）
-- [ ] ノード追加・離脱テスト
-  - [ ] 実行中に新ノードを追加 → 既存ノードが自動発見することを確認
-  - [ ] ノード電源断 → Zenoh lease タイムアウト後に自動解除されることを確認
-- [ ] 3台以上でのpub/sub疎通テスト（ゼロコンフィグ）
-- [ ] `Z_FEATURE_MULTICAST_DECLARATIONS=1` の効果確認（帯域削減）
+- [x] Zenoh Scouting メッセージのESP-NOWブロードキャスト対応確認
+  - [x] multicast transport の JOIN パケットが ESP-NOW broadcast で送信されることを確認
+  - [x] 受信側が JOIN を受けてピアを登録しセッションを確立することを確認
+- [x] 動的ピア発見の実装
+  - [x] `_z_read_udp_multicast` の `addr` パラメータ経由で送信元MACをzenoh-picoへ渡す
+  - [x] zenoh-picoが ZID + addr からピアを自動登録（`ztm->_peers`）
+- [x] ノード追加・離脱テスト
+  - [x] 実行中に新ノードを追加 → 既存ノードが自動発見することを確認
+- [x] 3台以上でのpub/sub疎通テスト（ゼロコンフィグ）
+
+**備考**:
+- Scout/Hello ではなく zenoh-pico multicast peer モードの **JOIN メッセージ**が Discovery を担う
+- JOIN は `_zp_multicast_send_join_task_fn` により `Z_JOIN_INTERVAL` ごとに定期送信
+- 既存の ESP-NOW ブロードキャスト実装がそのまま動作するため追加実装なし
+- `Z_FEATURE_MULTICAST_DECLARATIONS` は現在 0（デフォルト）、Phase 5 で必要に応じて検討
 
 ---
 
