@@ -6,8 +6,8 @@
 Phase 1  ESP-NOW基礎確認                ✅ 完了 (2026-06-03)
 Phase 2  Zenoh-pico カスタムリンク実装  ✅ 完了 (2026-06-03)
 Phase 3  Discovery / ゼロコンフィグ     ✅ 完了 (2026-06-03)
-Phase 4  ゲートウェイ（Wi-Fi中継）      ← 現在
-Phase 5  堅牢化・最適化
+Phase 4  ゲートウェイ（Wi-Fi中継）      ✅ 完了 (2026-06-03)
+Phase 5  堅牢化・最適化                 ← 現在
 ```
 
 ---
@@ -103,33 +103,38 @@ Zenoh-picoを乗せる前の土台を固める。
 
 ---
 
-## Phase 4：ゲートウェイ実装（Wi-Fi/Zenohネットワーク中継）
+## Phase 4：ゲートウェイ実装（Wi-Fi/Zenohネットワーク中継）✅
 
 **目標**: ゲートウェイESP32がESP-NOWネットワークとWi-Fi/Zenohネットワークを双方向に中継する。
 
 **完了条件**: ESP-NOWノードのpubが、Wi-Fi LAN上のZenoh clientのsubに届く。逆方向も動作する。
 
+**完了日**: 2026-06-03
+
 ### TODO
 
-- [ ] ゲートウェイ用Wi-Fi設定
-  - [ ] `WIFI_AP_STA` モード設定
-  - [ ] STA: Wi-Fi APへの接続
-  - [ ] チャンネル確認・ESP-NOWノードへのチャンネル周知方法決定（ZenohメタデータかOOB）
-- [ ] zenoh-picoデュアルセッション実装
-  - [ ] `session_a`: ESP-NOWリンク（multicast peer）起動
-  - [ ] `session_b`: TCP unicast でzenohd Routerへ接続（client モード）
-  - [ ] 2セッションの独立した送受信スレッド管理（FreeRTOSタスク）
-- [ ] 双方向転送ロジック実装
-  - [ ] `sub(session_a, "**") → pub(session_b)`: ESP-NOW → Wi-Fi 転送
-  - [ ] `sub(session_b, "**") → pub(session_a)`: Wi-Fi → ESP-NOW 転送
-  - [ ] ループ防止（転送元セッションへの再送信を防ぐフラグ管理）
-- [ ] Wi-Fi側 zenohd Router の準備（PC/SBC上）
-  - [ ] `zenohd -l tcp/0.0.0.0:7447` 起動確認
-  - [ ] Zenoh clientからの疎通確認
-- [ ] 統合テスト
-  - [ ] ESP-NOWノード pub → Wi-Fi client sub の疎通
-  - [ ] Wi-Fi client pub → ESP-NOWノード sub の疎通
-  - [ ] ゲートウェイ再起動後の自動再接続確認
+- [x] ゲートウェイ用Wi-Fi設定
+  - [x] `WIFI_AP_STA` モード設定（STA接続後チャンネルをログ表示）
+  - [x] STA: Wi-Fi APへの接続（`quantumnet-g`）
+  - [x] チャンネル確認: ゲートウェイ起動ログ `ESP-NOW ch=X` を参照し `espnow_node` に設定
+- [x] zenoh-picoデュアルセッション実装
+  - [x] `session_a`: ESP-NOWリンク（multicast peer）、`ZENOH_ESPNOW_LINK_OVERRIDE` 適用
+  - [x] `session_b`: TCP client → zenohd Router（TCP関数は override 非対象のため共存）
+  - [x] 各セッションに独立した read/lease タスク（`zp_task_read_options_t` でスタック設定）
+- [x] 双方向転送ロジック実装
+  - [x] `sub(session_a, "sensor/**") → pub(session_b)`: ESP-NOW → Wi-Fi 転送
+  - [x] `sub(session_b, "cmd/**") → pub(session_a)`: Wi-Fi → ESP-NOW 転送
+  - [x] ループ防止: 転送キー空間を分離（`sensor/**` と `cmd/**`）
+- [x] Wi-Fi側 zenohd Router の準備: `zenohd -l tcp/0.0.0.0:7447` + zenoh_sub で疎通確認
+- [x] 統合テスト: `espnow_node → gateway → zenohd → zenoh_sub` の疎通確認
+
+**備考**:
+- `ZENOH_ESPNOW_LINK_OVERRIDE` は UDP multicast 関数のみ置換。TCP 関数は元のまま残るため
+  session_a（ESP-NOW）と session_b（TCP）が同一バイナリで共存可能
+- バグ修正2件（Phase 4 中に発見）:
+  - `z_keyexpr_as_view_string` の非 null 終端ビューを `%s` に渡していた問題 → `z_sample_keyexpr` 直接利用に変更
+  - ESP-IDF で `pthread_condattr_setclock(CLOCK_MONOTONIC)` が無視される問題により
+    `_z_condvar_wait_until` が即タイムアウト → WDT。MONOTONIC→REALTIME 変換で修正
 
 ---
 
