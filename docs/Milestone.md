@@ -3,9 +3,9 @@
 ## フェーズ概要
 
 ```
-Phase 1  ESP-NOW基礎確認          ✅ 完了 (2026-06-03)
-Phase 2  Zenoh-pico カスタムリンク実装  ← 現在
-Phase 3  Discovery / ゼロコンフィグ
+Phase 1  ESP-NOW基礎確認                ✅ 完了 (2026-06-03)
+Phase 2  Zenoh-pico カスタムリンク実装  ✅ 完了 (2026-06-03)
+Phase 3  Discovery / ゼロコンフィグ     ← 現在
 Phase 4  ゲートウェイ（Wi-Fi中継）
 Phase 5  堅牢化・最適化
 ```
@@ -44,29 +44,34 @@ Zenoh-picoを乗せる前の土台を固める。
 
 ---
 
-## Phase 2：Zenoh-pico カスタムリンク実装
+## Phase 2：Zenoh-pico カスタムリンク実装 ✅
 
 **目標**: Zenoh-picoのPAL層にESP-NOWを差し込み、Zenoh wire formatをESP-NOW上で運ぶ。
 
 **完了条件**: 2台のESP32間でZenoh pub/subが動作し、`z_put()` → `z_declare_subscriber()` コールバックが呼ばれる。
 
+**完了日**: 2026-06-03
+
 ### TODO
 
-- [ ] zenoh-pico を ESP-IDF コンポーネントとして追加（CMakeLists.txt設定）
-- [ ] ビルドフラグ設定
-  - [ ] `Z_FEATURE_MULTICAST_TRANSPORT=1`
-  - [ ] `Z_FEATURE_LINK_SERIAL=0`（シリアル不使用）
-  - [ ] `BATCH_MULTICAST_SIZE=250`（ESP-NOW v1.0制約）
-  - [ ] `Z_FRAG_MAX_SIZE=512`
-- [ ] カスタムリンク実装（`components/zenoh_espnow/`）
-  - [ ] `_z_espnow_open()`: ESP-NOW初期化、recv cbの登録
-  - [ ] `_z_espnow_close()`: ESP-NOW deint
-  - [ ] `_z_espnow_write()`: ブロードキャスト送信（`esp_now_send(FF..FF, buf, len)`）
-  - [ ] `_z_espnow_read()`: recvコールバックからリングバッファ経由でzenoh-picoへ渡す
-  - [ ] 受信コールバック → FreeRTOSキュー経由でread()に橋渡し
-- [ ] zenoh-pico multicast peer セッション確立確認
-- [ ] `z_put()` / `z_declare_subscriber()` 疎通テスト（2台）
-- [ ] 250Bを超えるペイロードのフラグメンテーション動作確認
+- [x] zenoh-pico を ESP-IDF コンポーネントとして追加（`components/zenoh_pico_idf/`）
+- [x] ビルドフラグ設定
+  - [x] `Z_FEATURE_MULTICAST_TRANSPORT=1`（config.h デフォルトで有効）
+  - [x] `Z_BATCH_MULTICAST_SIZE=250`（ESP-NOW v1.0制約、zenoh_espnow が注入）
+- [x] カスタムリンク実装（`components/zenoh_espnow/`）
+  - [x] `_z_open_udp_multicast()`: ESP-NOW初期化、recv cb登録、broadcastピア追加
+  - [x] `_z_close_udp_multicast()`: ESP-NOW deinit、FreeRTOSキュー削除
+  - [x] `_z_send_udp_multicast()`: `esp_now_send(FF:FF:FF:FF:FF:FF, buf, len)`
+  - [x] `_z_read_udp_multicast()`: FreeRTOSキュー経由でrecvコールバックから受信（タイムアウト対応）
+- [x] zenoh-pico multicast peer セッション確立確認
+- [x] `z_put()` / `z_declare_subscriber()` 疎通テスト（2台、`examples/espnow_node`）
+
+**備考**:
+- UDP multicast PAL関数をオーバーライドする方式を採用（zenoh-picoコアへの変更最小化）
+- zenoh-picoへのパッチは2箇所のみ: `network.c` ガード + `config.h` の `#ifndef` 化
+- 実装ソースを `zenoh_pico_idf` に注入することで静的ライブラリのリンク順問題を回避
+- `ZENOH_ESPNOW_LINK_OVERRIDE` フラグで元のUDP multicast実装を条件コンパイルで無効化
+- AP不要（Wi-Fi STA起動のみ）、チャンネルはKconfigで設定
 
 ---
 
