@@ -30,20 +30,15 @@ Standard Zenoh runs over TCP/UDP and requires a network infrastructure.  This pr
 
 ## Quick Start
 
-### 1. Clone
+### 1. Clone and set up
 
 ```bash
-git clone --recurse-submodules <repo-url>
+git clone <repo-url>
 cd zenoh-espnow
+bash scripts/setup.sh   # initializes submodule and applies zenoh-pico patches
 ```
 
-### 2. Apply zenoh-pico patches
-
-```bash
-scripts/apply_patches.sh
-```
-
-### 3. Flash `espnow_node` to two or more ESP32-S3 boards
+### 2. Flash `espnow_node` to two or more ESP32-S3 boards
 
 ```bash
 cd examples/espnow_node
@@ -92,24 +87,49 @@ Peer discovery uses zenoh-pico's built-in **JOIN message mechanism**: each node 
 - **Hardware**: ESP32-S3 (or ESP32 / ESP32-C — set `IDF_TARGET` in `CMakeLists.txt`)
 - **Software**: [ESP-IDF v5.5.x](https://github.com/espressif/esp-idf), Git
 
+## Using as a Component in an Existing ESP-IDF Project
+
+Clone this repository into your project's `components/` directory:
+
+```bash
+cd your_project/components
+git clone <repo-url> zenoh-espnow
+cd zenoh-espnow
+bash scripts/setup.sh   # initializes submodule and applies zenoh-pico patches
+```
+
+Add to your project's `CMakeLists.txt`:
+
+```cmake
+list(APPEND EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/components/zenoh-espnow")
+```
+
+In your component's `CMakeLists.txt`:
+
+```cmake
+idf_component_register(
+    ...
+    REQUIRES zenoh_pico_idf zenoh_espnow
+)
+```
+
 ## Repository Structure
 
 ```
 zenoh-espnow/
-├── components/
-│   ├── zenoh_pico_idf/          ESP-IDF component wrapper for zenoh-pico
-│   └── zenoh_espnow/            ESP-NOW transport library
-│       ├── include/zenoh_espnow.h
-│       ├── src/zenoh_espnow_link.c
-│       └── zenoh_espnow_patch/  Minimal patches to zenoh-pico
+├── zenoh_espnow/                ESP-NOW transport component
+│   ├── include/zenoh_espnow.h
+│   └── src/zenoh_espnow_link.c
+├── zenoh_pico_idf/              ESP-IDF component wrapper for zenoh-pico
+├── zenoh-pico/                  Submodule — zenoh-pico v1.9.0
+├── patches/                     Minimal patches applied to zenoh-pico
 ├── examples/
 │   ├── espnow_node/             Core example: Zenoh pub/sub over ESP-NOW
 │   ├── gateway/                 Advanced: bridge to Wi-Fi / zenohd
 │   ├── espnow_broadcast/        Utility: bare ESP-NOW channel test
 │   └── zenoh_pubsub/            Utility: zenoh-pico over standard Wi-Fi
-├── third_party/zenoh-pico/      Submodule — zenoh-pico v1.9.0
 ├── docs/                        spec.md, Milestone.md
-└── scripts/apply_patches.sh
+└── scripts/setup.sh             Submodule init + patch apply
 ```
 
 ## Examples

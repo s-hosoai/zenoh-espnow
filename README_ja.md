@@ -30,20 +30,15 @@
 
 ## クイックスタート
 
-### 1. クローン
+### 1. クローンとセットアップ
 
 ```bash
-git clone --recurse-submodules <repo-url>
+git clone <repo-url>
 cd zenoh-espnow
+bash scripts/setup.sh   # サブモジュール初期化と zenoh-pico へのパッチ適用
 ```
 
-### 2. zenoh-pico へパッチを適用
-
-```bash
-scripts/apply_patches.sh
-```
-
-### 3. 2台以上の ESP32-S3 に `espnow_node` を書き込む
+### 2. 2台以上の ESP32-S3 に `espnow_node` を書き込む
 
 ```bash
 cd examples/espnow_node
@@ -92,24 +87,49 @@ zenoh-pico  peer mode
 - **ハードウェア**: ESP32-S3（ESP32 / ESP32-C も可 — `CMakeLists.txt` の `IDF_TARGET` を変更）
 - **ソフトウェア**: [ESP-IDF v5.5.x](https://github.com/espressif/esp-idf)、Git
 
+## 既存の ESP-IDF プロジェクトへの組み込み
+
+プロジェクトの `components/` ディレクトリにクローンするだけで使用できます：
+
+```bash
+cd your_project/components
+git clone <repo-url> zenoh-espnow
+cd zenoh-espnow
+bash scripts/setup.sh   # サブモジュール初期化とパッチ適用
+```
+
+プロジェクトの `CMakeLists.txt` に追加：
+
+```cmake
+list(APPEND EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/components/zenoh-espnow")
+```
+
+コンポーネントの `CMakeLists.txt` に追加：
+
+```cmake
+idf_component_register(
+    ...
+    REQUIRES zenoh_pico_idf zenoh_espnow
+)
+```
+
 ## リポジトリ構成
 
 ```
 zenoh-espnow/
-├── components/
-│   ├── zenoh_pico_idf/          zenoh-pico の ESP-IDF コンポーネントラッパー
-│   └── zenoh_espnow/            ESP-NOW トランスポートライブラリ
-│       ├── include/zenoh_espnow.h
-│       ├── src/zenoh_espnow_link.c
-│       └── zenoh_espnow_patch/  zenoh-pico への最小限のパッチ
+├── zenoh_espnow/                ESP-NOW トランスポートコンポーネント
+│   ├── include/zenoh_espnow.h
+│   └── src/zenoh_espnow_link.c
+├── zenoh_pico_idf/              zenoh-pico の ESP-IDF コンポーネントラッパー
+├── zenoh-pico/                  サブモジュール — zenoh-pico v1.9.0
+├── patches/                     zenoh-pico への最小限のパッチ
 ├── examples/
 │   ├── espnow_node/             コアサンプル: ESP-NOW 上の Zenoh pub/sub
 │   ├── gateway/                 応用: Wi-Fi / zenohd へのブリッジ
 │   ├── espnow_broadcast/        ユーティリティ: 生 ESP-NOW チャンネル確認
 │   └── zenoh_pubsub/            ユーティリティ: 標準 Wi-Fi 上の zenoh-pico
-├── third_party/zenoh-pico/      サブモジュール — zenoh-pico v1.9.0
 ├── docs/                        spec.md, Milestone.md
-└── scripts/apply_patches.sh
+└── scripts/setup.sh             サブモジュール初期化 + パッチ適用
 ```
 
 ## サンプル一覧
