@@ -17,13 +17,14 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "freertos/event_groups.h"
+
+#include "esp_event.h"
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_wifi.h"
-#include "esp_event.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/event_groups.h"
+#include "freertos/task.h"
 #include "nvs_flash.h"
 #include "zenoh-pico.h"
 #include "zenoh_espnow.h"
@@ -31,9 +32,9 @@
 static const char *TAG = "gateway";
 
 /* ---- Global sessions and subscriber ---- */
-static z_owned_session_t    s_sa;     /* session_a: ESP-NOW (permanent) */
-static z_owned_session_t    s_sb;     /* session_b: TCP/zenohd (reconnectable) */
-static z_owned_subscriber_t s_sub_b;  /* subscriber on session_b */
+static z_owned_session_t s_sa;       /* session_a: ESP-NOW (permanent) */
+static z_owned_session_t s_sb;       /* session_b: TCP/zenohd (reconnectable) */
+static z_owned_subscriber_t s_sub_b; /* subscriber on session_b */
 
 /* Guards fwd_a_to_b from calling z_put on a closed session_b.
  * Set true only after sub_b is declared; cleared before closing session_b.
@@ -42,31 +43,29 @@ static z_owned_subscriber_t s_sub_b;  /* subscriber on session_b */
 static volatile bool s_session_b_ready = false;
 
 /* ---- Wi-Fi state ---- */
-#define WIFI_CONNECTED_BIT    BIT0
-#define SESSION_B_RESET_BIT   BIT1  /* set when session_b should be reconnected */
+#define WIFI_CONNECTED_BIT BIT0
+#define SESSION_B_RESET_BIT BIT1 /* set when session_b should be reconnected */
 
 static EventGroupHandle_t s_state_eg;
 
-static void wifi_event_handler(void *arg, esp_event_base_t base,
-                                int32_t id, void *data)
-{
+static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         xEventGroupClearBits(s_state_eg, WIFI_CONNECTED_BIT);
-        esp_wifi_connect();  /* retry indefinitely — no max limit for gateway */
+        esp_wifi_connect(); /* retry indefinitely — no max limit for gateway */
         ESP_LOGW(TAG, "Wi-Fi disconnected, retrying...");
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *ev = (ip_event_got_ip_t *)data;
-        uint8_t ch; wifi_second_chan_t sc;
+        uint8_t ch;
+        wifi_second_chan_t sc;
         esp_wifi_get_channel(&ch, &sc);
         ESP_LOGI(TAG, "IP: " IPSTR "  ESP-NOW ch=%d", IP2STR(&ev->ip_info.ip), ch);
         xEventGroupSetBits(s_state_eg, WIFI_CONNECTED_BIT | SESSION_B_RESET_BIT);
     }
 }
 
-static void wifi_init_apsta(void)
-{
+static void wifi_init_apsta(void) {
     s_state_eg = xEventGroupCreate();
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
@@ -76,50 +75,45 @@ static void wifi_init_apsta(void)
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(
-        WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler, NULL, NULL));
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(
-        IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event_handler, NULL, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler, NULL, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event_handler, NULL, NULL));
 
     wifi_config_t sta_cfg = {
-        .sta = {
-            .ssid      = CONFIG_WIFI_SSID,
-            .password  = CONFIG_WIFI_PASSWORD,
-            .threshold = { .authmode = WIFI_AUTH_WPA2_PSK },
-        },
+        .sta =
+            {
+                .ssid = CONFIG_WIFI_SSID,
+                .password = CONFIG_WIFI_PASSWORD,
+                .threshold = {.authmode = WIFI_AUTH_WPA2_PSK},
+            },
     };
     /* AP: minimal softAP to advertise the channel to ESP-NOW nodes */
     wifi_config_t ap_cfg = {
-        .ap = {
-            .ssid           = "gw-espnow",
-            .ssid_len       = 10,
-            .channel        = 0,    /* follows STA channel after connect */
-            .authmode       = WIFI_AUTH_OPEN,
-            .max_connection = 0,
-        },
+        .ap =
+            {
+                .ssid = "gw-espnow",
+                .ssid_len = 10,
+                .channel = 0, /* follows STA channel after connect */
+                .authmode = WIFI_AUTH_OPEN,
+                .max_connection = 0,
+            },
     };
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta_cfg));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP,  &ap_cfg));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_cfg));
     ESP_ERROR_CHECK(esp_wifi_start());
     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
 
-    xEventGroupWaitBits(s_state_eg, WIFI_CONNECTED_BIT,
-                        pdFALSE, pdTRUE, portMAX_DELAY);
+    xEventGroupWaitBits(s_state_eg, WIFI_CONNECTED_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
 }
 
 /* ---- Forwarding helpers ---- */
 
-static void forward_sample(z_loaned_sample_t *sample,
-                            z_loaned_session_t *dst,
-                            const char *direction)
-{
+static void forward_sample(z_loaned_sample_t *sample, z_loaned_session_t *dst, const char *direction) {
     z_view_string_t key_view;
     z_keyexpr_as_view_string(z_sample_keyexpr(sample), &key_view);
 
-    ESP_LOGD(TAG, "%s  '%.*s'", direction,
-             (int)z_string_len(z_view_string_loan(&key_view)),
+    ESP_LOGD(TAG, "%s  '%.*s'", direction, (int)z_string_len(z_view_string_loan(&key_view)),
              z_string_data(z_view_string_loan(&key_view)));
 
     z_owned_string_t payload_str;
@@ -128,8 +122,7 @@ static void forward_sample(z_loaned_sample_t *sample,
     z_owned_bytes_t fwd;
     z_bytes_copy_from_str(&fwd, z_string_data(z_string_loan(&payload_str)));
     if (z_put(dst, z_sample_keyexpr(sample), z_move(fwd), NULL) < 0) {
-        ESP_LOGW(TAG, "%s put failed for '%.*s'", direction,
-                 (int)z_string_len(z_view_string_loan(&key_view)),
+        ESP_LOGW(TAG, "%s put failed for '%.*s'", direction, (int)z_string_len(z_view_string_loan(&key_view)),
                  z_string_data(z_view_string_loan(&key_view)));
     }
 
@@ -137,29 +130,25 @@ static void forward_sample(z_loaned_sample_t *sample,
 }
 
 /* sub_a callback: ESP-NOW -> Wi-Fi */
-static void fwd_a_to_b(z_loaned_sample_t *sample, void *arg)
-{
+static void fwd_a_to_b(z_loaned_sample_t *sample, void *arg) {
     (void)arg;
-    if (!s_session_b_ready) return;  /* session_b disconnected */
+    if (!s_session_b_ready) return; /* session_b disconnected */
     forward_sample(sample, z_loan_mut(s_sb), "ESP-NOW->WiFi");
 }
 
 /* sub_b callback: Wi-Fi -> ESP-NOW */
-static void fwd_b_to_a(z_loaned_sample_t *sample, void *arg)
-{
+static void fwd_b_to_a(z_loaned_sample_t *sample, void *arg) {
     (void)arg;
     forward_sample(sample, z_loan_mut(s_sa), "WiFi->ESP-NOW");
 }
 
 /* ---- Session_a (permanent, opened once) ---- */
 
-static z_result_t open_session_a(void)
-{
+static z_result_t open_session_a(void) {
     z_owned_config_t cfg;
     z_config_default(&cfg);
     zp_config_insert(z_loan_mut(cfg), Z_CONFIG_MODE_KEY, "peer");
-    zp_config_insert(z_loan_mut(cfg), Z_CONFIG_LISTEN_KEY,
-                     "udp/224.0.0.225:7447#iface=sta");
+    zp_config_insert(z_loan_mut(cfg), Z_CONFIG_LISTEN_KEY, "udp/224.0.0.225:7447#iface=sta");
 
     ESP_LOGI(TAG, "Opening session_a (ESP-NOW)...");
     if (z_open(&s_sa, z_move(cfg), NULL) < 0) {
@@ -167,11 +156,10 @@ static z_result_t open_session_a(void)
         return _Z_ERR_GENERIC;
     }
 
-    z_task_attr_t attr = { .name = "zr_sa", .priority = 5, .stack_depth = 8192 };
-    zp_task_read_options_t  ro = { .task_attributes = &attr };
-    zp_task_lease_options_t lo = { .task_attributes = &attr };
-    if (zp_start_read_task(z_loan_mut(s_sa), &ro) < 0 ||
-        zp_start_lease_task(z_loan_mut(s_sa), &lo) < 0) {
+    z_task_attr_t attr = {.name = "zr_sa", .priority = 5, .stack_depth = 8192};
+    zp_task_read_options_t ro = {.task_attributes = &attr};
+    zp_task_lease_options_t lo = {.task_attributes = &attr};
+    if (zp_start_read_task(z_loan_mut(s_sa), &ro) < 0 || zp_start_lease_task(z_loan_mut(s_sa), &lo) < 0) {
         ESP_LOGE(TAG, "session_a tasks failed");
         return _Z_ERR_GENERIC;
     }
@@ -181,18 +169,16 @@ static z_result_t open_session_a(void)
 
 /* ---- Session_b (reconnectable) ---- */
 
-static void close_session_b(void)
-{
-    s_session_b_ready = false;       /* stop fwd_a_to_b from using session_b */
-    vTaskDelay(pdMS_TO_TICKS(20));   /* let any in-flight fwd_a_to_b call finish */
+static void close_session_b(void) {
+    s_session_b_ready = false;     /* stop fwd_a_to_b from using session_b */
+    vTaskDelay(pdMS_TO_TICKS(20)); /* let any in-flight fwd_a_to_b call finish */
 
-    z_drop(z_move(s_sub_b));         /* undeclare subscriber first */
-    z_drop(z_move(s_sb));            /* close session (stops read/lease tasks) */
+    z_drop(z_move(s_sub_b)); /* undeclare subscriber first */
+    z_drop(z_move(s_sb));    /* close session (stops read/lease tasks) */
     ESP_LOGI(TAG, "session_b closed");
 }
 
-static z_result_t open_session_b(void)
-{
+static z_result_t open_session_b(void) {
     z_owned_config_t cfg;
     z_config_default(&cfg);
     zp_config_insert(z_loan_mut(cfg), Z_CONFIG_MODE_KEY, "client");
@@ -204,11 +190,10 @@ static z_result_t open_session_b(void)
         return _Z_ERR_GENERIC;
     }
 
-    z_task_attr_t attr = { .name = "zr_sb", .priority = 5, .stack_depth = 8192 };
-    zp_task_read_options_t  ro = { .task_attributes = &attr };
-    zp_task_lease_options_t lo = { .task_attributes = &attr };
-    if (zp_start_read_task(z_loan_mut(s_sb), &ro) < 0 ||
-        zp_start_lease_task(z_loan_mut(s_sb), &lo) < 0) {
+    z_task_attr_t attr = {.name = "zr_sb", .priority = 5, .stack_depth = 8192};
+    zp_task_read_options_t ro = {.task_attributes = &attr};
+    zp_task_lease_options_t lo = {.task_attributes = &attr};
+    if (zp_start_read_task(z_loan_mut(s_sb), &ro) < 0 || zp_start_lease_task(z_loan_mut(s_sb), &lo) < 0) {
         ESP_LOGE(TAG, "session_b tasks failed");
         z_drop(z_move(s_sb));
         return _Z_ERR_GENERIC;
@@ -225,31 +210,28 @@ static z_result_t open_session_b(void)
         return _Z_ERR_GENERIC;
     }
 
-    s_session_b_ready = true;        /* enable ESP-NOW -> Wi-Fi forwarding */
+    s_session_b_ready = true; /* enable ESP-NOW -> Wi-Fi forwarding */
     ESP_LOGI(TAG, "session_b OK  sub('%s')", CONFIG_FWD_WIFI_TO_ESPNOW_KEY);
     return _Z_RES_OK;
 }
 
 /* Reconnect session_b with exponential backoff.
  * Blocks until the connection succeeds. */
-static void reconnect_session_b(void)
-{
+static void reconnect_session_b(void) {
     close_session_b();
 
     uint32_t delay_ms = 1000;
     int attempt = 1;
     while (open_session_b() != _Z_RES_OK) {
-        ESP_LOGW(TAG, "session_b reconnect #%d failed, retry in %"PRIu32"ms",
-                 attempt++, delay_ms);
+        ESP_LOGW(TAG, "session_b reconnect #%d failed, retry in %" PRIu32 "ms", attempt++, delay_ms);
         vTaskDelay(pdMS_TO_TICKS(delay_ms));
-        if (delay_ms < 30000) delay_ms *= 2;  /* cap at 30 s */
+        if (delay_ms < 30000) delay_ms *= 2; /* cap at 30 s */
     }
 }
 
 /* ---- app_main ---- */
 
-void app_main(void)
-{
+void app_main(void) {
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -282,12 +264,8 @@ void app_main(void)
 
     /* Main loop: heartbeat + session_b reconnect on Wi-Fi recovery */
     while (1) {
-        EventBits_t bits = xEventGroupWaitBits(
-            s_state_eg,
-            SESSION_B_RESET_BIT,
-            pdTRUE,    /* clear on exit */
-            pdFALSE,
-            pdMS_TO_TICKS(5000));
+        EventBits_t bits = xEventGroupWaitBits(s_state_eg, SESSION_B_RESET_BIT, pdTRUE, /* clear on exit */
+                                               pdFALSE, pdMS_TO_TICKS(5000));
 
         if (bits & SESSION_B_RESET_BIT) {
             ESP_LOGI(TAG, "Wi-Fi recovered, reconnecting session_b...");
@@ -295,9 +273,7 @@ void app_main(void)
             reconnect_session_b();
         }
 
-        ESP_LOGI(TAG, "alive  session_b=%s  rx_dropped=%"PRIu32"  tx_failed=%"PRIu32,
-                 s_session_b_ready ? "UP" : "DOWN",
-                 zenoh_espnow_get_rx_dropped(),
-                 zenoh_espnow_get_tx_failed());
+        ESP_LOGI(TAG, "alive  session_b=%s  rx_dropped=%" PRIu32 "  tx_failed=%" PRIu32,
+                 s_session_b_ready ? "UP" : "DOWN", zenoh_espnow_get_rx_dropped(), zenoh_espnow_get_tx_failed());
     }
 }

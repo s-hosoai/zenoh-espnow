@@ -13,20 +13,20 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
+
+#include "esp_event.h"
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_wifi.h"
-#include "esp_event.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "nvs_flash.h"
 #include "zenoh-pico.h"
 
 static const char *TAG = "espnow_node";
 
 /* ---- Wi-Fi: start STA without connecting to any AP ---- */
-static void wifi_init_no_connect(void)
-{
+static void wifi_init_no_connect(void) {
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     esp_netif_create_default_wifi_sta();
@@ -41,13 +41,11 @@ static void wifi_init_no_connect(void)
 
     uint8_t mac[6];
     esp_wifi_get_mac(ESP_IF_WIFI_STA, mac);
-    ESP_LOGI(TAG, "Wi-Fi STA started  MAC=" MACSTR "  ch=%d",
-             MAC2STR(mac), CONFIG_ESPNOW_CHANNEL);
+    ESP_LOGI(TAG, "Wi-Fi STA started  MAC=" MACSTR "  ch=%d", MAC2STR(mac), CONFIG_ESPNOW_CHANNEL);
 }
 
 /* ---- Zenoh subscriber callback ---- */
-static void sub_handler(z_loaned_sample_t *sample, void *arg)
-{
+static void sub_handler(z_loaned_sample_t *sample, void *arg) {
     (void)arg;
     z_view_string_t key;
     z_keyexpr_as_view_string(z_sample_keyexpr(sample), &key);
@@ -55,18 +53,15 @@ static void sub_handler(z_loaned_sample_t *sample, void *arg)
     z_owned_string_t payload;
     z_bytes_to_string(z_sample_payload(sample), &payload);
 
-    ESP_LOGI(TAG, "RX  '%.*s'  '%.*s'",
-             (int)z_string_len(z_view_string_loan(&key)),
-             z_string_data(z_view_string_loan(&key)),
-             (int)z_string_len(z_string_loan(&payload)),
+    ESP_LOGI(TAG, "RX  '%.*s'  '%.*s'", (int)z_string_len(z_view_string_loan(&key)),
+             z_string_data(z_view_string_loan(&key)), (int)z_string_len(z_string_loan(&payload)),
              z_string_data(z_string_loan(&payload)));
 
     z_string_drop(z_string_move(&payload));
 }
 
 /* ---- Main ---- */
-void app_main(void)
-{
+void app_main(void) {
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -81,8 +76,7 @@ void app_main(void)
     z_owned_config_t config;
     z_config_default(&config);
     zp_config_insert(z_loan_mut(config), Z_CONFIG_MODE_KEY, "peer");
-    zp_config_insert(z_loan_mut(config), Z_CONFIG_LISTEN_KEY,
-                     "udp/224.0.0.225:7447#iface=sta");
+    zp_config_insert(z_loan_mut(config), Z_CONFIG_LISTEN_KEY, "udp/224.0.0.225:7447#iface=sta");
 
     ESP_LOGI(TAG, "Opening Zenoh session (ESP-NOW transport)...");
     z_owned_session_t s;
@@ -91,8 +85,7 @@ void app_main(void)
         return;
     }
 
-    if (zp_start_read_task(z_loan_mut(s), NULL) < 0 ||
-        zp_start_lease_task(z_loan_mut(s), NULL) < 0) {
+    if (zp_start_read_task(z_loan_mut(s), NULL) < 0 || zp_start_lease_task(z_loan_mut(s), NULL) < 0) {
         ESP_LOGE(TAG, "Failed to start Zenoh background tasks");
         z_drop(z_move(s));
         return;
@@ -118,8 +111,7 @@ void app_main(void)
     uint8_t mac[6];
     esp_wifi_get_mac(ESP_IF_WIFI_STA, mac);
     char pub_key[64];
-    snprintf(pub_key, sizeof(pub_key), "%s/" MACSTR "/data",
-             CONFIG_ZENOH_KEY_PREFIX, MAC2STR(mac));
+    snprintf(pub_key, sizeof(pub_key), "%s/" MACSTR "/data", CONFIG_ZENOH_KEY_PREFIX, MAC2STR(mac));
     ESP_LOGI(TAG, "Publishing on '%s' every 2s", pub_key);
 
     z_view_keyexpr_t pub_ke;
@@ -128,7 +120,7 @@ void app_main(void)
     char buf[80];
     uint32_t seq = 0;
     while (1) {
-        snprintf(buf, sizeof(buf), "{\"seq\":%"PRIu32",\"mac\":\""MACSTR"\"}", seq++, MAC2STR(mac));
+        snprintf(buf, sizeof(buf), "{\"seq\":%" PRIu32 ",\"mac\":\"" MACSTR "\"}", seq++, MAC2STR(mac));
         z_owned_bytes_t payload;
         z_bytes_copy_from_str(&payload, buf);
         if (z_put(z_loan(s), z_loan(pub_ke), z_move(payload), NULL) < 0) {
