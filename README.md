@@ -35,7 +35,7 @@ Standard Zenoh runs over TCP/UDP and requires a network infrastructure.  This pr
 ```bash
 git clone <repo-url>
 cd zenoh-espnow
-bash scripts/setup.sh   # initializes submodule and applies zenoh-pico patches
+bash scripts/setup.sh   # initializes submodule
 ```
 
 ### 2. Flash `espnow_node` to two or more ESP32-S3 boards
@@ -95,13 +95,13 @@ Clone this repository into your project's `components/` directory:
 cd your_project/components
 git clone <repo-url> zenoh-espnow
 cd zenoh-espnow
-bash scripts/setup.sh   # initializes submodule and applies zenoh-pico patches
+bash scripts/setup.sh   # initializes submodule
 ```
 
 Add to your project's `CMakeLists.txt`:
 
 ```cmake
-list(APPEND EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/components/zenoh-espnow")
+list(APPEND EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/components/zenoh-espnow/components")
 ```
 
 In your component's `CMakeLists.txt`:
@@ -117,19 +117,19 @@ idf_component_register(
 
 ```
 zenoh-espnow/
-├── zenoh_espnow/                ESP-NOW transport component
-│   ├── include/zenoh_espnow.h
-│   └── src/zenoh_espnow_link.c
-├── zenoh_pico_idf/              ESP-IDF component wrapper for zenoh-pico
-├── zenoh-pico/                  Submodule — zenoh-pico v1.9.0
-├── patches/                     Minimal patches applied to zenoh-pico
+├── components/
+│   ├── zenoh_espnow/            ESP-NOW transport component
+│   │   ├── include/zenoh_espnow.h
+│   │   └── src/zenoh_espnow_link.c
+│   └── zenoh_pico_idf/          ESP-IDF component wrapper for zenoh-pico
+├── zenoh-pico/                  Submodule — zenoh-pico (upstream main)
 ├── examples/
 │   ├── espnow_node/             Core example: Zenoh pub/sub over ESP-NOW
 │   ├── gateway/                 Advanced: bridge to Wi-Fi / zenohd
 │   ├── espnow_broadcast/        Utility: bare ESP-NOW channel test
 │   └── zenoh_pubsub/            Utility: zenoh-pico over standard Wi-Fi
 ├── docs/                        spec.md, Milestone.md
-└── scripts/setup.sh             Submodule init + patch apply
+└── scripts/setup.sh             Submodule init
 ```
 
 ## Examples
@@ -223,6 +223,7 @@ uint32_t zenoh_espnow_get_tx_failed(void);   // TX failure count (with retry)
 | No encryption | Broadcast and CCMP are mutually exclusive in ESP-NOW |
 | Best-effort only | No ACK; use zenoh Advanced Pub/Sub for reliability |
 | Single ESP-NOW session | Global singleton per binary |
+| Gateway TCP connection broken | The `gateway` example currently fails to connect to zenohd. Root cause under investigation. |
 
 ## License
 

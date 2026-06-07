@@ -1,9 +1,7 @@
 /*
  * zenoh_espnow_link.c
  *
- * Replaces zenoh-pico's UDP multicast PAL functions with ESP-NOW equivalents.
- * Enabled by defining ZENOH_ESPNOW_LINK_OVERRIDE in zenoh_pico_idf, which
- * suppresses the original implementations in network.c.
+ * Implements zenoh-pico's UDP multicast PAL (_z_udp_multicast_*) with ESP-NOW.
  *
  * Transport semantics:
  *   write  -> esp_now_send(FF:FF:FF:FF:FF:FF, buf, len)   // broadcast
@@ -20,11 +18,7 @@
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
-
-/* zenoh-pico internal headers (available via zenoh_pico_idf include path) */
-#include "zenoh-pico/collections/slice.h"
-#include "zenoh-pico/system/link/udp.h"
-#include "zenoh-pico/utils/result.h"
+#include "zenoh-pico/link/transport/udp_multicast.h"
 #include "zenoh_espnow.h"
 
 static const char *TAG = "zenoh_espnow";
@@ -67,7 +61,6 @@ static void _espnow_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t 
 
     if (xQueueSend(s_rx_queue, &item, 0) != pdTRUE) {
         s_rx_dropped++;
-        /* Warn periodically to avoid log flood */
         if ((s_rx_dropped % ESPNOW_RX_DROP_LOG_EVERY) == 1) {
             ESP_LOGW(TAG, "RX queue full, dropped=%" PRIu32, s_rx_dropped);
         }
@@ -103,9 +96,8 @@ static esp_err_t _espnow_init(void) {
     esp_now_register_recv_cb(_espnow_recv_cb);
     esp_now_register_send_cb(_espnow_send_cb);
 
-    /* Add broadcast peer (required for esp_now_send to FF:FF:FF:FF:FF:FF) */
     esp_now_peer_info_t peer = {
-        .channel = 0, /* 0 = follow current Wi-Fi channel */
+        .channel = 0,
         .ifidx = ESP_IF_WIFI_STA,
         .encrypt = false,
     };
@@ -129,28 +121,26 @@ static esp_err_t _espnow_init(void) {
     return ESP_OK;
 }
 
-/* ---- zenoh-pico UDP multicast PAL overrides ---- */
+/* ---- zenoh-pico UDP multicast PAL ---- */
 
-/*
- * Called once by _z_f_link_open_udp_multicast to set up the send socket.
- * lep (local endpoint) is left zeroed; freeaddrinfo(NULL) is a lwIP no-op.
- */
-z_result_t _z_open_udp_multicast(_z_sys_net_socket_t *sock, const _z_sys_net_endpoint_t rep, _z_sys_net_endpoint_t *lep,
+z_result_t _z_udp_multicast_endpoint_init_from_address(_z_sys_net_endpoint_t *ep, const _z_string_t *address) {
+    return _z_udp_multicast_default_endpoint_init_from_address(ep, address);
+}
+
+void _z_udp_multicast_endpoint_clear(_z_sys_net_endpoint_t *ep) { _z_udp_multicast_default_endpoint_clear(ep); }
+
+z_result_t _z_udp_multicast_open(_z_sys_net_socket_t *sock, const _z_sys_net_endpoint_t rep, _z_sys_net_endpoint_t *lep,
                                  uint32_t tout, const char *iface) {
     (void)rep;
     (void)tout;
     (void)iface;
     if (_espnow_init() != ESP_OK) return _Z_ERR_GENERIC;
     if (lep != NULL) lep->_iptcp = NULL;
-    sock->_fd = 0; /* dummy: not a real file descriptor */
+    sock->_fd = 0;
     return _Z_RES_OK;
 }
 
-/*
- * Called once by _z_f_link_listen_udp_multicast to set up the receive socket.
- * Stores the receive timeout so _z_read_udp_multicast can honour it.
- */
-z_result_t _z_listen_udp_multicast(_z_sys_net_socket_t *sock, const _z_sys_net_endpoint_t rep, uint32_t tout,
+z_result_t _z_udp_multicast_listen(_z_sys_net_socket_t *sock, const _z_sys_net_endpoint_t rep, uint32_t tout,
                                    const char *iface, const char *join) {
     (void)rep;
     (void)iface;
@@ -161,8 +151,7 @@ z_result_t _z_listen_udp_multicast(_z_sys_net_socket_t *sock, const _z_sys_net_e
     return _Z_RES_OK;
 }
 
-/* Called by _z_f_link_close_udp_multicast. */
-void _z_close_udp_multicast(_z_sys_net_socket_t *sockrecv, _z_sys_net_socket_t *socksend,
+void _z_udp_multicast_close(_z_sys_net_socket_t *sockrecv, _z_sys_net_socket_t *socksend,
                             const _z_sys_net_endpoint_t rep, const _z_sys_net_endpoint_t lep) {
     (void)socksend;
     (void)rep;
@@ -181,12 +170,7 @@ void _z_close_udp_multicast(_z_sys_net_socket_t *sockrecv, _z_sys_net_socket_t *
     ESP_LOGI(TAG, "Closed  rx_dropped=%" PRIu32 "  tx_failed=%" PRIu32, s_rx_dropped, s_tx_failed);
 }
 
-/*
- * Block until one ESP-NOW packet arrives (or timeout).
- * Returns the number of bytes written to ptr, or SIZE_MAX on timeout/error.
- * If addr != NULL, fills it with the sender's MAC address (6 bytes).
- */
-size_t _z_read_udp_multicast(const _z_sys_net_socket_t sock, uint8_t *ptr, size_t len, const _z_sys_net_endpoint_t lep,
+size_t _z_udp_multicast_read(const _z_sys_net_socket_t sock, uint8_t *ptr, size_t len, const _z_sys_net_endpoint_t lep,
                              _z_slice_t *addr) {
     (void)sock;
     (void)lep;
@@ -194,13 +178,12 @@ size_t _z_read_udp_multicast(const _z_sys_net_socket_t sock, uint8_t *ptr, size_
 
     _espnow_rx_item_t item;
     if (xQueueReceive(s_rx_queue, &item, s_rx_ticks) != pdTRUE) {
-        return SIZE_MAX; /* timeout — zenoh-pico loops and retries */
+        return SIZE_MAX;
     }
 
     size_t n = (item.len < (uint16_t)len) ? item.len : (uint16_t)len;
     memcpy(ptr, item.data, n);
 
-    /* Provide sender MAC so zenoh-pico can perform peer discovery */
     if (addr != NULL && addr->start != NULL && addr->len >= ESP_NOW_ETH_ALEN) {
         memcpy((uint8_t *)addr->start, item.src_mac, ESP_NOW_ETH_ALEN);
         addr->len = ESP_NOW_ETH_ALEN;
@@ -209,22 +192,13 @@ size_t _z_read_udp_multicast(const _z_sys_net_socket_t sock, uint8_t *ptr, size_
     return n;
 }
 
-/*
- * ESP-NOW is datagram-based: each receive returns exactly one complete
- * message, so read_exact reduces to a single read call.
- */
-size_t _z_read_exact_udp_multicast(const _z_sys_net_socket_t sock, uint8_t *ptr, size_t len,
+size_t _z_udp_multicast_read_exact(const _z_sys_net_socket_t sock, uint8_t *ptr, size_t len,
                                    const _z_sys_net_endpoint_t lep, _z_slice_t *addr) {
-    return _z_read_udp_multicast(sock, ptr, len, lep, addr);
+    return _z_udp_multicast_read(sock, ptr, len, lep, addr);
 }
 
-/*
- * Broadcast one zenoh batch over ESP-NOW.
- * Retries up to ESPNOW_TX_RETRIES times if the internal queue is full.
- * Other errors are non-retryable and counted in s_tx_failed.
- */
-size_t _z_send_udp_multicast(const _z_sys_net_socket_t sock, const uint8_t *ptr, size_t len,
-                             const _z_sys_net_endpoint_t rep) {
+size_t _z_udp_multicast_write(const _z_sys_net_socket_t sock, const uint8_t *ptr, size_t len,
+                              const _z_sys_net_endpoint_t rep) {
     (void)sock;
     (void)rep;
     if (len > ESPNOW_PAYLOAD_MAX) {
@@ -237,7 +211,7 @@ size_t _z_send_udp_multicast(const _z_sys_net_socket_t sock, const uint8_t *ptr,
     for (int i = 0; i < ESPNOW_TX_RETRIES; i++) {
         err = esp_now_send(BROADCAST_MAC, ptr, len);
         if (err == ESP_OK) return len;
-        if (err != ESP_ERR_ESPNOW_NO_MEM) break; /* non-retryable */
+        if (err != ESP_ERR_ESPNOW_NO_MEM) break;
         vTaskDelay(pdMS_TO_TICKS(ESPNOW_TX_RETRY_DELAY_MS));
     }
 

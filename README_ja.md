@@ -35,7 +35,7 @@
 ```bash
 git clone <repo-url>
 cd zenoh-espnow
-bash scripts/setup.sh   # サブモジュール初期化と zenoh-pico へのパッチ適用
+bash scripts/setup.sh   # サブモジュール初期化
 ```
 
 ### 2. 2台以上の ESP32-S3 に `espnow_node` を書き込む
@@ -95,13 +95,13 @@ zenoh-pico  peer mode
 cd your_project/components
 git clone <repo-url> zenoh-espnow
 cd zenoh-espnow
-bash scripts/setup.sh   # サブモジュール初期化とパッチ適用
+bash scripts/setup.sh   # サブモジュール初期化
 ```
 
 プロジェクトの `CMakeLists.txt` に追加：
 
 ```cmake
-list(APPEND EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/components/zenoh-espnow")
+list(APPEND EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/components/zenoh-espnow/components")
 ```
 
 コンポーネントの `CMakeLists.txt` に追加：
@@ -117,19 +117,19 @@ idf_component_register(
 
 ```
 zenoh-espnow/
-├── zenoh_espnow/                ESP-NOW トランスポートコンポーネント
-│   ├── include/zenoh_espnow.h
-│   └── src/zenoh_espnow_link.c
-├── zenoh_pico_idf/              zenoh-pico の ESP-IDF コンポーネントラッパー
-├── zenoh-pico/                  サブモジュール — zenoh-pico v1.9.0
-├── patches/                     zenoh-pico への最小限のパッチ
+├── components/
+│   ├── zenoh_espnow/            ESP-NOW トランスポートコンポーネント
+│   │   ├── include/zenoh_espnow.h
+│   │   └── src/zenoh_espnow_link.c
+│   └── zenoh_pico_idf/          zenoh-pico の ESP-IDF コンポーネントラッパー
+├── zenoh-pico/                  サブモジュール — zenoh-pico（upstream main）
 ├── examples/
 │   ├── espnow_node/             コアサンプル: ESP-NOW 上の Zenoh pub/sub
 │   ├── gateway/                 応用: Wi-Fi / zenohd へのブリッジ
 │   ├── espnow_broadcast/        ユーティリティ: 生 ESP-NOW チャンネル確認
 │   └── zenoh_pubsub/            ユーティリティ: 標準 Wi-Fi 上の zenoh-pico
 ├── docs/                        spec.md, Milestone.md
-└── scripts/setup.sh             サブモジュール初期化 + パッチ適用
+└── scripts/setup.sh             サブモジュール初期化
 ```
 
 ## サンプル一覧
@@ -223,6 +223,7 @@ uint32_t zenoh_espnow_get_tx_failed(void);   // TX 失敗回数（リトライ�
 | 暗号化なし | ブロードキャストと CCMP は共存不可 |
 | ベストエフォートのみ | ACK なし；確実な配信には zenoh Advanced Pub/Sub を検討 |
 | ESP-NOW セッションは 1 バイナリに 1 つ | グローバルシングルトン |
+| Gateway TCP 接続不可（既知の不具合） | `gateway` サンプルが zenohd への接続に失敗する。原因調査中。 |
 
 ## ライセンス
 
